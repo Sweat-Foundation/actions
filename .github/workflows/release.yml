@@ -157,8 +157,8 @@ jobs:
             send
 
   notify-slack:
-    needs: release
-    if: inputs.contract-name != ''
+    needs: [release, store-blob]
+    if: always() && inputs.contract-name != '' && needs.release.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -176,7 +176,9 @@ jobs:
           WASM_PATH: ${{ inputs.wasm-path }}
           DAO_ACCOUNT_ID: ${{ inputs.dao-account-id }}
           REMOVE_BLOB_URL: ${{ inputs.remove-blob-url }}
+          STORE_BLOB_RESULT: ${{ needs.store-blob.result }}
           RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ inputs.tag }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
 
@@ -193,11 +195,14 @@ jobs:
           text=$(printf '*%s %s released*\n%s\n*wasm sha256:* `%s`\n<%s|View release>' \
             "$CONTRACT_NAME" "$version" "$description" "$wasm_hash" "$RELEASE_URL")
 
-          # When this release was also stored as a DAO blob, link to the remove-blob workflow
-          # plus the exact hash it expects — computed independently of store-blob's own success
-          # (base58(sha256(file)), matching what store_blob returns), so it's always correct even
-          # if store-blob rejected a duplicate.
-          if [[ -n "$DAO_ACCOUNT_ID" ]]; then
+          if [[ -n "$DAO_ACCOUNT_ID" && "$STORE_BLOB_RESULT" == "failure" ]]; then
+            # Don't report success when store-blob actually failed — surface the failure instead
+            # of silently omitting it.
+            text=$(printf '%s\n:warning: *store_blob failed* — <%s|see workflow run>' "$text" "$RUN_URL")
+          elif [[ -n "$DAO_ACCOUNT_ID" && "$STORE_BLOB_RESULT" == "success" ]]; then
+            # Link to the remove-blob workflow plus the exact hash it expects — computed
+            # independently of store-blob (base58(sha256(file)), matching what store_blob
+            # returns), so it's correct regardless of how store-blob computed its own deposit.
             blob_hash=$(python3 -c "
           import hashlib
           digest = hashlib.sha256(open('$WASM_PATH', 'rb').read()).digest()
