@@ -65,6 +65,32 @@ jobs:
 | `attached-deposit`     | no                    | `''` (auto) | Deposit attached to the call. Leave empty to auto-calculate the exact minimum from [NEAR's storage staking price](https://docs.near.org/protocol/storage/storage-staking) (1e19 yoctoNEAR/byte) for the file at `blob-path`, plus the 32-byte bookkeeping overhead `store_blob` charges per blob (verified against `near-daos/sputnik-dao-contract`'s source). Set explicitly if the target DAO contract charges differently. |
 | `secrets.dao-signer-private-key` | yes if `dao-account-id` set | | NEAR private key (`ed25519:...`) for `proposer-account-id`. |
 
+### Optional: notify Slack
+
+Set `contract-name` (and pass `secrets.slack-webhook-url`) to post a message to Slack after the release is
+published, with the contract name, version, description, wasm sha256 hash, and a link to the release.
+
+```yaml
+jobs:
+  release:
+    uses: Sweat-Foundation/actions/.github/workflows/release.yml@v1
+    with:
+      files: |
+        res/sweat_jar.wasm
+      contract-name: sweat_jar
+      release-description: "Adds Oracle-gated feature toggles."
+      wasm-path: res/sweat_jar.wasm
+    secrets:
+      slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+```
+
+| Name                        | Required                    | Default | Description                                                        |
+|------------------------------|------------------------------|---------|----------------------------------------------------------------------|
+| `contract-name`              | no                           | `''`    | Contract/project name shown in the message. Leave empty to skip this job entirely. |
+| `release-description`        | no                           | `''`    | Short, one-or-two-line description of the release.                  |
+| `wasm-path`                  | yes if `contract-name` set   | `''`    | File to compute the sha256 hash of.                                 |
+| `secrets.slack-webhook-url`  | yes if `contract-name` set   |         | Slack incoming webhook URL.                                         |
+
 ## Versioning
 
 Tag releases of this repo (`v1`, `v2`, ...) and have callers pin to a tag. Move the major tag (`v1`) forward as
