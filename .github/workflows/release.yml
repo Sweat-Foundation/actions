@@ -22,6 +22,46 @@ on:
         required: false
         type: boolean
         default: true
+      dao-account-id:
+        description: NEAR account ID of the DAO contract to store the release binary's blob on. Leave empty to skip this step.
+        required: false
+        type: string
+        default: ''
+      proposer-account-id:
+        description: NEAR account ID that signs and pays for the store_blob call.
+        required: false
+        type: string
+        default: ''
+      blob-path:
+        description: Path to the file to store as a blob on the DAO contract (e.g. the release wasm). Required when dao-account-id is set.
+        required: false
+        type: string
+        default: ''
+      network:
+        description: NEAR network to submit the store_blob transaction to.
+        required: false
+        type: string
+        default: mainnet
+      prepaid-gas:
+        description: Gas attached to the store_blob call.
+        required: false
+        type: string
+        default: '300 TGas'
+      attached-deposit:
+        description: >
+          Deposit attached to the store_blob call, e.g. "5 NEAR" or "500 yoctonear". Leave empty to
+          auto-calculate the exact minimum from NEAR's storage staking price (1e19 yoctoNEAR/byte,
+          https://docs.near.org/protocol/storage/storage-staking) for the file at blob-path, plus
+          sputnik-dao-contract's 32-byte bookkeeping overhead per stored blob (see store_blob in
+          near-daos/sputnik-dao-contract). Set explicitly if the target DAO contract charges
+          differently.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      dao-signer-private-key:
+        description: NEAR private key (e.g. ed25519:...) for proposer-account-id, used to sign the store_blob call. Required when dao-account-id is set.
+        required: false
 
 jobs:
   release:
@@ -39,3 +79,46 @@ jobs:
           name: ${{ inputs.title != '' && inputs.title || inputs.tag }}
           generate_release_notes: ${{ inputs.generate-notes }}
           files: ${{ inputs.files }}
+
+  store-blob:
+    needs: release
+    if: inputs.dao-account-id != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install near-cli-rs
+        uses: ./.github/actions/install-near-cli
+
+      - name: Store blob on DAO
+        env:
+          DAO_ACCOUNT_ID: ${{ inputs.dao-account-id }}
+          PROPOSER_ACCOUNT_ID: ${{ inputs.proposer-account-id }}
+          BLOB_PATH: ${{ inputs.blob-path }}
+          NETWORK: ${{ inputs.network }}
+          PREPAID_GAS: ${{ inputs.prepaid-gas }}
+          ATTACHED_DEPOSIT: ${{ inputs.attached-deposit }}
+          NEAR_SIGNER_PRIVATE_KEY: ${{ secrets.dao-signer-private-key }}
+        run: |
+          set -euo pipefail
+
+          deposit="$ATTACHED_DEPOSIT"
+          if [[ -z "$deposit" ]]; then
+            blob_bytes=$(stat -c%s "$BLOB_PATH")
+            # NEAR storage staking price: 1e19 yoctoNEAR per byte
+            # (https://docs.near.org/protocol/storage/storage-staking). store_blob additionally
+            # charges 32 bytes for the blobs map's CryptoHash key it writes alongside the raw
+            # blob (near-daos/sputnik-dao-contract, sputnikdao2/src/lib.rs `store_blob`).
+            deposit_yocto=$(python3 -c "print(($blob_bytes + 32) * 10_000_000_000_000_000_000)")
+            deposit="${deposit_yocto} yoctonear"
+          fi
+
+          near contract call-function as-transaction "$DAO_ACCOUNT_ID" store_blob \
+            file-args "$BLOB_PATH" \
+            prepaid-gas "$PREPAID_GAS" \
+            attached-deposit "$deposit" \
+            sign-as "$PROPOSER_ACCOUNT_ID" \
+            network-config "$NETWORK" \
+            sign-with-plaintext-private-key "$NEAR_SIGNER_PRIVATE_KEY" \
+            send

@@ -1,0 +1,19 @@
+name: Install near-cli-rs
+description: Download the near-cli-rs release binary and verify its checksum before installing.
+
+runs:
+  using: composite
+  steps:
+    - name: Download, verify and install near-cli-rs
+      shell: bash
+      env:
+        VERSION: 0.29.0
+        SHA256: e63eb0610972c5e2f9fc451056fa0187201c19b8aa49e72143de70c57d043d09
+      run: |
+        cd "$RUNNER_TEMP"
+        curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o near-cli.tar.gz \
+          "https://github.com/near/near-cli-rs/releases/download/v${VERSION}/near-cli-rs-x86_64-unknown-linux-gnu.tar.gz"
+        echo "${SHA256}  near-cli.tar.gz" | sha256sum -c -
+        tar -xzf near-cli.tar.gz
+        install -m 755 near-cli-rs-x86_64-unknown-linux-gnu/near "$HOME/.cargo/bin/near"
+        near --version
