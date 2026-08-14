@@ -1,0 +1,70 @@
+name: Remove DAO Blob
+
+on:
+  workflow_call:
+    inputs:
+      dao-account-id:
+        description: NEAR account ID of the DAO contract to remove the blob from.
+        required: true
+        type: string
+      proposer-account-id:
+        description: NEAR account ID that originally stored the blob. remove_blob only allows the original storer to remove it.
+        required: true
+        type: string
+      hash:
+        description: Base58-encoded sha256 hash of the blob to remove, as returned by store_blob.
+        required: true
+        type: string
+      network:
+        description: NEAR network to submit the remove_blob transaction to.
+        required: false
+        type: string
+        default: mainnet
+      prepaid-gas:
+        description: Gas attached to the remove_blob call.
+        required: false
+        type: string
+        default: '100 TGas'
+    secrets:
+      proposer-private-key:
+        description: NEAR private key (e.g. ed25519:...) for proposer-account-id, used to sign the remove_blob call.
+        required: true
+
+jobs:
+  remove-blob:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install near-cli-rs
+        env:
+          VERSION: 0.29.0
+          SHA256: e63eb0610972c5e2f9fc451056fa0187201c19b8aa49e72143de70c57d043d09
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o near-cli.tar.gz \
+            "https://github.com/near/near-cli-rs/releases/download/v${VERSION}/near-cli-rs-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${SHA256}  near-cli.tar.gz" | sha256sum -c -
+          tar -xzf near-cli.tar.gz
+          install -m 755 near-cli-rs-x86_64-unknown-linux-gnu/near "$HOME/.cargo/bin/near"
+          near --version
+
+      - name: Remove blob from DAO
+        env:
+          DAO_ACCOUNT_ID: ${{ inputs.dao-account-id }}
+          PROPOSER_ACCOUNT_ID: ${{ inputs.proposer-account-id }}
+          HASH: ${{ inputs.hash }}
+          NETWORK: ${{ inputs.network }}
+          PREPAID_GAS: ${{ inputs.prepaid-gas }}
+          PROPOSER_PRIVATE_KEY: ${{ secrets.proposer-private-key }}
+        run: |
+          set -euo pipefail
+
+          # remove_blob is not #[payable] — near-sdk rejects any nonzero attached deposit.
+          near contract call-function as-transaction "$DAO_ACCOUNT_ID" remove_blob \
+            json-args "{\"hash\": \"$HASH\"}" \
+            prepaid-gas "$PREPAID_GAS" \
+            attached-deposit '0 NEAR' \
+            sign-as "$PROPOSER_ACCOUNT_ID" \
+            network-config "$NETWORK" \
+            sign-with-plaintext-private-key "$PROPOSER_PRIVATE_KEY" \
+            send

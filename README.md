@@ -90,6 +90,47 @@ jobs:
 | `wasm-path`                  | yes if `contract-name` set   | `''`    | File to compute the sha256 hash of.                                 |
 | `secrets.slack-webhook-url`  | yes if `contract-name` set   |         | Slack incoming webhook URL.                                         |
 
+## remove-blob
+
+Manually invokable: calls `remove_blob` on a sputnik-dao contract to delete a previously stored blob and refund its
+storage deposit to the account that originally stored it (`remove_blob` only allows the original storer to remove
+it). Not triggered automatically — wire it behind `workflow_dispatch` in the calling repo so it only runs when
+someone deliberately runs it.
+
+```yaml
+name: Remove DAO Blob
+
+on:
+  workflow_dispatch:
+    inputs:
+      hash:
+        description: Base58 sha256 hash of the blob to remove (as returned by store_blob).
+        required: true
+        type: string
+
+jobs:
+  remove-blob:
+    uses: Sweat-Foundation/actions/.github/workflows/remove-blob.yml@v1
+    with:
+      dao-account-id: sweat.sputnik-dao.near
+      proposer-account-id: bot.sweat.near
+      hash: ${{ inputs.hash }}
+    secrets:
+      proposer-private-key: ${{ secrets.PROPOSER_PRIVATE_KEY }}
+```
+
+| Name                          | Required | Default    | Description                                                        |
+|--------------------------------|----------|------------|------------------------------------------------------------------------|
+| `dao-account-id`               | yes      |            | DAO contract to call `remove_blob` on.                                |
+| `proposer-account-id`          | yes      |            | Account that originally stored the blob; must match to succeed.       |
+| `hash`                         | yes      |            | Base58 sha256 hash of the blob, as returned by `store_blob`.          |
+| `network`                      | no       | `mainnet`  | NEAR network.                                                          |
+| `prepaid-gas`                  | no       | `100 TGas` | Gas attached to the call.                                              |
+| `secrets.proposer-private-key` | yes      |            | NEAR private key (`ed25519:...`) for `proposer-account-id`.           |
+
+`remove_blob` isn't `#[payable]`, so no deposit is attached (near-sdk rejects any nonzero deposit on a non-payable
+method) — the contract itself refunds the original storage deposit to `proposer-account-id`.
+
 ## Versioning
 
 Tag releases of this repo (`v1`, `v2`, ...) and have callers pin to a tag. Move the major tag (`v1`) forward as
