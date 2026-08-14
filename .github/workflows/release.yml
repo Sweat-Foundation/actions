@@ -68,6 +68,15 @@ on:
         required: false
         type: string
         default: ''
+      remove-blob-url:
+        description: >
+          URL of the calling repo's remove-blob workflow run page, linked from the Slack message
+          alongside the blob's hash when dao-account-id is set. Defaults to
+          https://github.com/<repo>/actions/workflows/remove-blob.yml — override if your wrapper
+          workflow file isn't named remove-blob.yml.
+        required: false
+        type: string
+        default: ''
     secrets:
       proposer-private-key:
         description: NEAR private key (e.g. ed25519:...) for proposer-account-id, used to sign the store_blob call. Required when dao-account-id is set.
@@ -165,6 +174,8 @@ jobs:
           CONTRACT_NAME: ${{ inputs.contract-name }}
           TAG: ${{ inputs.tag }}
           WASM_PATH: ${{ inputs.wasm-path }}
+          DAO_ACCOUNT_ID: ${{ inputs.dao-account-id }}
+          REMOVE_BLOB_URL: ${{ inputs.remove-blob-url }}
           RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ inputs.tag }}
         run: |
           set -euo pipefail
@@ -181,6 +192,28 @@ jobs:
 
           text=$(printf '*%s %s released*\n%s\n*wasm sha256:* `%s`\n<%s|View release>' \
             "$CONTRACT_NAME" "$version" "$description" "$wasm_hash" "$RELEASE_URL")
+
+          # When this release was also stored as a DAO blob, link to the remove-blob workflow
+          # plus the exact hash it expects — computed independently of store-blob's own success
+          # (base58(sha256(file)), matching what store_blob returns), so it's always correct even
+          # if store-blob rejected a duplicate.
+          if [[ -n "$DAO_ACCOUNT_ID" ]]; then
+            blob_hash=$(python3 -c "
+          import hashlib
+          digest = hashlib.sha256(open('$WASM_PATH', 'rb').read()).digest()
+          alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+          num = int.from_bytes(digest, 'big')
+          enc = ''
+          while num:
+              num, rem = divmod(num, 58)
+              enc = alphabet[rem] + enc
+          pad = len(digest) - len(digest.lstrip(b'\x00'))
+          print(alphabet[0] * pad + enc)
+          ")
+            remove_url="${REMOVE_BLOB_URL:-https://github.com/${REPO}/actions/workflows/remove-blob.yml}"
+            text=$(printf '%s\nBlob hash: `%s` — <%s|remove from DAO storage>' \
+              "$text" "$blob_hash" "$remove_url")
+          fi
 
           payload=$(jq -n --arg text "$text" '{text: $text}')
           curl --fail -sS -X POST -H 'Content-Type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"

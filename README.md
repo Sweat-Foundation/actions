@@ -69,7 +69,9 @@ jobs:
 
 Set `contract-name` (and pass `secrets.slack-webhook-url`) to post a message to Slack after the release is
 published, with the contract name, version, wasm sha256 hash, and a link to the release. The message body reuses
-the GitHub release's auto-generated notes (capped to 300 characters) as the description.
+the GitHub release's auto-generated notes (capped to 300 characters) as the description. When `dao-account-id` is
+also set, the message additionally includes the blob's base58 hash and a link to the [remove-blob](#remove-blob)
+workflow's run page, so removing it later doesn't require digging through logs.
 
 ```yaml
 jobs:
@@ -88,6 +90,7 @@ jobs:
 |------------------------------|------------------------------|---------|----------------------------------------------------------------------|
 | `contract-name`              | no                           | `''`    | Contract/project name shown in the message. Leave empty to skip this job entirely. |
 | `wasm-path`                  | yes if `contract-name` set   | `''`    | File to compute the sha256 hash of.                                 |
+| `remove-blob-url`            | no                           | `''` (auto) | Link shown next to the blob hash when `dao-account-id` is set. Defaults to `https://github.com/<repo>/actions/workflows/remove-blob.yml` — override if your wrapper workflow file isn't named `remove-blob.yml`. |
 | `secrets.slack-webhook-url`  | yes if `contract-name` set   |         | Slack incoming webhook URL.                                         |
 
 ## remove-blob
