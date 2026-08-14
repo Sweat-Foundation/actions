@@ -12,7 +12,10 @@ on:
         required: true
         type: string
       hash:
-        description: Base58-encoded sha256 hash of the blob to remove, as returned by store_blob.
+        description: >
+          Base58-encoded sha256 hash of the blob to remove, as shown in the release's Slack
+          notification or returned by store_blob. NOT the plain sha256 hex digest — that will fail
+          to decode (base58 excludes the characters 0, O, I, l).
         required: true
         type: string
       network:

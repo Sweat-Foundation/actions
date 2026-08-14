@@ -216,8 +216,10 @@ jobs:
           print(alphabet[0] * pad + enc)
           ")
             remove_url="${REMOVE_BLOB_URL:-https://github.com/${REPO}/actions/workflows/remove-blob.yml}"
-            text=$(printf '%s\nBlob hash: `%s` — <%s|remove from DAO storage>' \
-              "$text" "$blob_hash" "$remove_url")
+            # remove_blob's `hash` input takes the base58 form specifically — the sha256 hex
+            # above will fail to decode (base58 excludes 0/O/I/l), so spell out which is which.
+            text=$(printf '%s\nBlob hash (sha256 hex): `%s`\nBlob hash (base58, use this for remove_blob): `%s` — <%s|remove from DAO storage>' \
+              "$text" "$wasm_hash" "$blob_hash" "$remove_url")
           fi
 
           payload=$(jq -n --arg text "$text" '{text: $text}')
