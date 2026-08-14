@@ -63,18 +63,13 @@ on:
         required: false
         type: string
         default: ''
-      release-description:
-        description: Short, one-or-two-line description of the release for the Slack notification.
-        required: false
-        type: string
-        default: ''
       wasm-path:
         description: Path to the wasm (or other artifact) to hash for the Slack notification. Required when contract-name is set.
         required: false
         type: string
         default: ''
     secrets:
-      dao-signer-private-key:
+      proposer-private-key:
         description: NEAR private key (e.g. ed25519:...) for proposer-account-id, used to sign the store_blob call. Required when dao-account-id is set.
         required: false
       slack-webhook-url:
@@ -117,7 +112,7 @@ jobs:
           NETWORK: ${{ inputs.network }}
           PREPAID_GAS: ${{ inputs.prepaid-gas }}
           ATTACHED_DEPOSIT: ${{ inputs.attached-deposit }}
-          NEAR_SIGNER_PRIVATE_KEY: ${{ secrets.dao-signer-private-key }}
+          PROPOSER_PRIVATE_KEY: ${{ secrets.proposer-private-key }}
         run: |
           set -euo pipefail
 
@@ -138,23 +133,26 @@ jobs:
             attached-deposit "$deposit" \
             sign-as "$PROPOSER_ACCOUNT_ID" \
             network-config "$NETWORK" \
-            sign-with-plaintext-private-key "$NEAR_SIGNER_PRIVATE_KEY" \
+            sign-with-plaintext-private-key "$PROPOSER_PRIVATE_KEY" \
             send
 
   notify-slack:
     needs: release
     if: inputs.contract-name != ''
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Notify Slack
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           SLACK_WEBHOOK_URL: ${{ secrets.slack-webhook-url }}
           CONTRACT_NAME: ${{ inputs.contract-name }}
           TAG: ${{ inputs.tag }}
-          DESCRIPTION: ${{ inputs.release-description }}
           WASM_PATH: ${{ inputs.wasm-path }}
           RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ inputs.tag }}
         run: |
@@ -162,8 +160,16 @@ jobs:
 
           version="${TAG#v}"
           wasm_hash=$(sha256sum "$WASM_PATH" | awk '{print $1}')
+
+          # Reuse the GitHub release's auto-generated notes as the Slack description, capped to
+          # keep the message short.
+          description=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
+          if [[ ${#description} -gt 300 ]]; then
+            description="${description:0:300}…"
+          fi
+
           text=$(printf '*%s %s released*\n%s\n*wasm sha256:* `%s`\n<%s|View release>' \
-            "$CONTRACT_NAME" "$version" "$DESCRIPTION" "$wasm_hash" "$RELEASE_URL")
+            "$CONTRACT_NAME" "$version" "$description" "$wasm_hash" "$RELEASE_URL")
 
           payload=$(jq -n --arg text "$text" '{text: $text}')
           curl --fail -sS -X POST -H 'Content-Type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"

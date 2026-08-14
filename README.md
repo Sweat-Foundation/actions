@@ -36,7 +36,7 @@ jobs:
 
 ### Optional: store the release binary on a DAO contract
 
-Set `dao-account-id` (and pass `secrets.dao-signer-private-key`) to also call `store_blob` on a
+Set `dao-account-id` (and pass `secrets.proposer-private-key`) to also call `store_blob` on a
 [sputnik-dao](https://github.com/near-daos/sputnik-dao-contract) DAO contract after the release is published,
 via [`near-cli-rs`](https://github.com/near/near-cli-rs) (installed checksum-verified) signed non-interactively
 with `sign-with-plaintext-private-key`.
@@ -52,7 +52,7 @@ jobs:
       proposer-account-id: bot.sweat.near
       blob-path: res/sweat_jar.wasm
     secrets:
-      dao-signer-private-key: ${{ secrets.DAO_SIGNER_PRIVATE_KEY }}
+      proposer-private-key: ${{ secrets.PROPOSER_PRIVATE_KEY }}
 ```
 
 | Name                   | Required             | Default | Description                                                                 |
@@ -63,12 +63,13 @@ jobs:
 | `network`              | no                    | `mainnet` | NEAR network.                                                              |
 | `prepaid-gas`          | no                    | `300 TGas` | Gas attached to the call.                                                |
 | `attached-deposit`     | no                    | `''` (auto) | Deposit attached to the call. Leave empty to auto-calculate the exact minimum from [NEAR's storage staking price](https://docs.near.org/protocol/storage/storage-staking) (1e19 yoctoNEAR/byte) for the file at `blob-path`, plus the 32-byte bookkeeping overhead `store_blob` charges per blob (verified against `near-daos/sputnik-dao-contract`'s source). Set explicitly if the target DAO contract charges differently. |
-| `secrets.dao-signer-private-key` | yes if `dao-account-id` set | | NEAR private key (`ed25519:...`) for `proposer-account-id`. |
+| `secrets.proposer-private-key` | yes if `dao-account-id` set | | NEAR private key (`ed25519:...`) for `proposer-account-id`. |
 
 ### Optional: notify Slack
 
 Set `contract-name` (and pass `secrets.slack-webhook-url`) to post a message to Slack after the release is
-published, with the contract name, version, description, wasm sha256 hash, and a link to the release.
+published, with the contract name, version, wasm sha256 hash, and a link to the release. The message body reuses
+the GitHub release's auto-generated notes (capped to 300 characters) as the description.
 
 ```yaml
 jobs:
@@ -78,7 +79,6 @@ jobs:
       files: |
         res/sweat_jar.wasm
       contract-name: sweat_jar
-      release-description: "Adds Oracle-gated feature toggles."
       wasm-path: res/sweat_jar.wasm
     secrets:
       slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -87,7 +87,6 @@ jobs:
 | Name                        | Required                    | Default | Description                                                        |
 |------------------------------|------------------------------|---------|----------------------------------------------------------------------|
 | `contract-name`              | no                           | `''`    | Contract/project name shown in the message. Leave empty to skip this job entirely. |
-| `release-description`        | no                           | `''`    | Short, one-or-two-line description of the release.                  |
 | `wasm-path`                  | yes if `contract-name` set   | `''`    | File to compute the sha256 hash of.                                 |
 | `secrets.slack-webhook-url`  | yes if `contract-name` set   |         | Slack incoming webhook URL.                                         |
 
