@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      files:
+        description: Newline-separated list of file paths/globs to attach to the release.
+        required: true
+        type: string
+      tag:
+        description: Tag to release. Defaults to the ref that triggered the calling workflow.
+        required: false
+        type: string
+        default: ${{ github.ref_name }}
+      title:
+        description: Release title. Defaults to the tag name.
+        required: false
+        type: string
+        default: ''
+      generate-notes:
+        description: Auto-generate release notes from merged PRs since the previous tag.
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Create release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.title != '' && inputs.title || inputs.tag }}
+          generate_release_notes: ${{ inputs.generate-notes }}
+          files: ${{ inputs.files }}
