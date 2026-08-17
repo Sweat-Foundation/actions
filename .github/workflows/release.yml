@@ -182,45 +182,91 @@ jobs:
         run: |
           set -euo pipefail
 
-          version="${TAG#v}"
-          wasm_hash=$(sha256sum "$WASM_PATH" | awk '{print $1}')
+          export DESCRIPTION=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
+          export REMOVE_URL="${REMOVE_BLOB_URL:-https://github.com/${REPO}/actions/workflows/remove-blob.yml}"
 
-          # Reuse the GitHub release's auto-generated notes as the Slack description, capped to
-          # keep the message short.
-          description=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
-          if [[ ${#description} -gt 300 ]]; then
-            description="${description:0:300}…"
-          fi
-
-          text=$(printf '*%s %s released*\n%s\n*wasm sha256:* `%s`\n<%s|View release>' \
-            "$CONTRACT_NAME" "$version" "$description" "$wasm_hash" "$RELEASE_URL")
-
-          if [[ -n "$DAO_ACCOUNT_ID" && "$STORE_BLOB_RESULT" == "failure" ]]; then
-            # Don't report success when store-blob actually failed — surface the failure instead
-            # of silently omitting it.
-            text=$(printf '%s\n:warning: *store_blob failed* — <%s|see workflow run>' "$text" "$RUN_URL")
-          elif [[ -n "$DAO_ACCOUNT_ID" && "$STORE_BLOB_RESULT" == "success" ]]; then
-            # Link to the remove-blob workflow plus the exact hash it expects — computed
-            # independently of store-blob (base58(sha256(file)), matching what store_blob
-            # returns), so it's correct regardless of how store-blob computed its own deposit.
-            blob_hash=$(python3 -c "
+          # Build a Slack Block Kit payload rather than the plain `text` field: GitHub's
+          # auto-generated release notes use GitHub markdown (##, **, [text](url)), which Slack's
+          # mrkdwn does not understand, so the notes are parsed and re-rendered here instead of
+          # passed through as-is. blob_hash is base58(sha256(file)) — what store_blob returns and
+          # what remove_blob's `hash` input expects — computed independently of store-blob so it's
+          # correct regardless of how store-blob computed its own deposit.
+          python3 <<'PY' > payload.json
           import hashlib
-          digest = hashlib.sha256(open('$WASM_PATH', 'rb').read()).digest()
-          alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-          num = int.from_bytes(digest, 'big')
-          enc = ''
+          import json
+          import os
+          import re
+
+          contract_name = os.environ["CONTRACT_NAME"]
+          version = os.environ["TAG"].removeprefix("v")
+          wasm_path = os.environ["WASM_PATH"]
+          release_url = os.environ["RELEASE_URL"]
+          run_url = os.environ["RUN_URL"]
+          dao_account_id = os.environ["DAO_ACCOUNT_ID"]
+          store_blob_result = os.environ["STORE_BLOB_RESULT"]
+          remove_url = os.environ["REMOVE_URL"]
+          description = os.environ["DESCRIPTION"]
+
+          digest = hashlib.sha256(open(wasm_path, "rb").read()).digest()
+          wasm_hash = digest.hex()
+
+          alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+          num = int.from_bytes(digest, "big")
+          enc = ""
           while num:
               num, rem = divmod(num, 58)
               enc = alphabet[rem] + enc
-          pad = len(digest) - len(digest.lstrip(b'\x00'))
-          print(alphabet[0] * pad + enc)
-          ")
-            remove_url="${REMOVE_BLOB_URL:-https://github.com/${REPO}/actions/workflows/remove-blob.yml}"
-            # remove_blob's `hash` input takes the base58 form specifically — the sha256 hex
-            # above will fail to decode (base58 excludes 0/O/I/l), so spell out which is which.
-            text=$(printf '%s\nBlob hash (sha256 hex): `%s`\nBlob hash (base58, use this for remove_blob): `%s` — <%s|remove from DAO storage>' \
-              "$text" "$wasm_hash" "$blob_hash" "$remove_url")
-          fi
+          pad = len(digest) - len(digest.lstrip(b"\x00"))
+          blob_hash = alphabet[0] * pad + enc
 
-          payload=$(jq -n --arg text "$text" '{text: $text}')
-          curl --fail -sS -X POST -H 'Content-Type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
+          bullets = re.findall(r"^\*\s+(.+)$", description, flags=re.MULTILINE)
+          compare_match = re.search(r"Full Changelog\*\*:\s*(\S+)", description)
+          compare_url = compare_match.group(1) if compare_match else None
+
+          blocks = [{
+              "type": "section",
+              "text": {
+                  "type": "mrkdwn",
+                  "text": f"🚚 *{contract_name} {version}* is ready to deploy!\n<{release_url}|View release>",
+              },
+          }]
+
+          if bullets or compare_url:
+              lines = ["🗞️ *What's changed:*"]
+              lines += [f"• {b}" for b in bullets[:10]]
+              if compare_url:
+                  lines.append(f"<{compare_url}|Full changelog>")
+              blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}})
+
+          blocks.append({"type": "divider"})
+          blocks.append({
+              "type": "section",
+              "text": {
+                  "type": "mrkdwn",
+                  "text": f"🧮 *Checksum:*\n• *SHA256:* `{wasm_hash}`\n• *Base58:* `{blob_hash}`",
+              },
+          })
+
+          if dao_account_id:
+              blocks.append({"type": "divider"})
+              if store_blob_result == "failure":
+                  # Don't report success when store-blob actually failed — surface the failure
+                  # instead of silently omitting it.
+                  blocks.append({
+                      "type": "section",
+                      "text": {"type": "mrkdwn", "text": f"⚠️ *store_blob failed* — <{run_url}|see workflow run>"},
+                  })
+              elif store_blob_result == "success":
+                  blocks.append({
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"📦 *Blob hash:* `{blob_hash}`\n🗑️ <{remove_url}|Remove from DAO storage>",
+                      },
+                  })
+
+          fallback = f"{contract_name} {version} is ready to deploy"
+          print(json.dumps({"text": fallback, "blocks": blocks}))
+          PY
+
+          curl --fail -sS -X POST -H 'Content-Type: application/json' --data @payload.json "$SLACK_WEBHOOK_URL"
